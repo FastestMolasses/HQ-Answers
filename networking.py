@@ -2,6 +2,7 @@ import re
 import json
 import aiohttp
 import discord
+import messageBox
 
 BEARER_TOKEN = ''
 URL = 'https://api-quiz.hype.space/shows/now?type='
@@ -55,17 +56,22 @@ async def getBroadcast():
     return r.get('broadcast')
 
 
-async def websocketHandler(url: str, channel: discord.TextChannel):
+async def websocketHandler(url: str, channel: discord.TextChannel,
+                           resetFunc, messageBox: messageBox.MessageBox):
     """
         Handles websocket connections to HQ. Will retrieve both questions
         and answers during a live HQ game.
 
         :param url: The url of the socket to connect to.
         :param channel: The discord channel to send messages to.
+        :param resetFunc: A callback to reset the answer counters when a new question appears
+        :param messageBox: Used to store the discord embed information to display on Discord
     """
     async with aiohttp.ClientSession() as session:
         async with session.ws_connect(url, headers=HEADERS, heartbeat=5, timeout=30) as ws:
             await channel.send('HQ Trivia game is live!')
+
+            lastQuestion = ''
 
             # For every message received from the websocket...
             async for msg in ws:
@@ -78,30 +84,16 @@ async def websocketHandler(url: str, channel: discord.TextChannel):
                         await channel.send('Connection settings invalid!')
 
                     elif messageData.get('type') == 'question':
-                        print('QUESTION: ' + messageData.get('question'))
+                        question = messageData.get('question')
                         answers = [i.get('text')
                                    for i in messageData.get('answers')]
+
+                        print('QUESTION: ' + question)
                         print('ANSWERS: ' + str(answers))
 
-
-"""
-EXAMPLE TRAFFIC DATA
-{
-    "type": "question",
-    "ts": "2018-08-19T01:09:12.659Z",
-    "totalTimeMs": 10000,
-    "timeLeftMs": 10000,
-    "questionId": 55607,
-    "question": "Which of these is a subtitle of a Michael Bay “Transformers” film?",
-    "category": "Movies",
-    "answers": [
-        {"answerId": 168954, "text": "Dark Side of the Moon"},
-        {"answerId": 168955, "text": "Dark Moon"},
-        {"answerId": 168956, "text": "Dark of the Moon"}
-    ],
-    "questionNumber": 8,
-    "questionCount": 12,
-    "askTime": "2018-08-19T01:09:12.659Z",
-    "c": 1,
-    "sent": "2018-08-19T01:09:12.718Z"}
-"""
+                        # If the question has changed, then reset the answer counters
+                        if lastQuestion != question:
+                            lastQuestion = question
+                            resetFunc()
+                            # Reset the question embed
+                            await messageBox.resetEmbed(channel, question, answers)
